@@ -138,6 +138,69 @@ impl SimState {
     }
     pub fn step_forward(&self) -> SimState { self.at(1) }
     pub fn step_backward(&self) -> SimState { self.at(-1) }
+    /// An IRREVERSIBLE step (the arrow of time): a particle that would leave the grid is CLAMPED to
+    /// the edge and its velocity ZEROED - the pre-collision velocity is LOST. Once this happens,
+    /// reverse-propagation cannot uniquely recover the past (many pasts map to this present).
+    pub fn clamp_step(&self) -> SimState {
+        let particles = self.particles.iter().map(|p| {
+            let nx = p.x as i32 + p.vx as i32;
+            let ny = p.y as i32 + p.vy as i32;
+            let (x, vx) = if nx < 0 || nx >= self.w as i32 { (p.x, 0i16) } else { (nx as u16, p.vx) };
+            let (y, vy) = if ny < 0 || ny >= self.h as i32 { (p.y, 0i16) } else { (ny as u16, p.vy) };
+            Particle { x, y, vx, vy, tag: p.tag }
+        }).collect();
+        SimState { w: self.w, h: self.h, particles }
+    }
+}
+
+// ---------------------------------------------------------------- MTP movement matrix (the "time-travel" lens)
+fn torus_delta(from: u16, to: u16, m: u16) -> i32 {
+    let (d, m) = (to as i32 - from as i32, m as i32);
+    if d > m / 2 { d - m } else if d < -m / 2 { d + m } else { d } // shortest signed torus delta
+}
+/// The total movement matrix the MTP-1/2/3 supervisors measure between two slices: per metatag,
+/// MTP1 = pixel delta (dx,dy), MTP2 = frequency/shell (speed), MTP3 = cylinder/residue (tag identity).
+/// The lens projects the reverse slice (t-1) or future slice (t+1) from it - "time travel" as
+/// reversible retrodiction. `reversible` is false the moment the movement lost information (a clamp).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MtpMovementMatrix {
+    pub moves: Vec<(u32, i32, i32)>, // (tag, dx, dy)
+    pub reversible: bool,
+}
+impl MtpMovementMatrix {
+    pub fn measure(a: &SimState, b: &SimState) -> MtpMovementMatrix {
+        let mut moves = Vec::new();
+        let mut reversible = a.particles.len() == b.particles.len();
+        for pa in &a.particles {
+            match b.particles.iter().find(|pb| pb.tag == pa.tag) {
+                Some(pb) => {
+                    if pb.vx != pa.vx || pb.vy != pa.vy { reversible = false; } // velocity lost -> irreversible
+                    moves.push((pa.tag, torus_delta(pa.x, pb.x, a.w), torus_delta(pa.y, pb.y, a.h)));
+                }
+                None => reversible = false,
+            }
+        }
+        MtpMovementMatrix { moves, reversible }
+    }
+    fn apply(&self, state: &SimState, dir: i32) -> SimState {
+        let particles = state.particles.iter().map(|p| {
+            let (dx, dy) = self.moves.iter().find(|(t, _, _)| *t == p.tag).map(|(_, dx, dy)| (*dx, *dy)).unwrap_or((0, 0));
+            Particle {
+                x: (p.x as i32 + dir * dx).rem_euclid(state.w as i32) as u16,
+                y: (p.y as i32 + dir * dy).rem_euclid(state.h as i32) as u16,
+                vx: p.vx, vy: p.vy, tag: p.tag,
+            }
+        }).collect();
+        SimState { w: state.w, h: state.h, particles }
+    }
+    /// Reverse LeWorld through the lens: project the slice one tick into the PAST (retrodiction).
+    pub fn project_reverse(&self, state: &SimState) -> SimState { self.apply(state, -1) }
+    /// Forward LeWorld: project the slice one tick into the FUTURE.
+    pub fn project_forward(&self, state: &SimState) -> SimState { self.apply(state, 1) }
+    pub fn hbp(&self) -> String {
+        format!("MTPMATRIX|moves={}|mtp1=pixel_delta|mtp2=frequency_shell|mtp3=cylinder_residue|reversible={}|lens=reverse_leworld_projection|body_in_row=0|json=0",
+            self.moves.len(), self.reversible)
+    }
 }
 
 // ---------------------------------------------------------------- the slice-time harness
@@ -357,5 +420,30 @@ mod tests {
         let px1 = OmnibitPixel::of(slice, 3, 5, 7, 440, 1, 0);
         assert!(px1.residual_bits > 0); // 1 cylinder under-covers -> residual selector remains
         assert!(px2.to_hbp().contains("payload=selector-not-raw") && px2.to_hbp().ends_with("json=0"));
+    }
+
+    #[test]
+    fn mtp_movement_matrix_reverse_leworld_is_byte_identical_time_travel() {
+        let s0 = sample_state();
+        let s1 = s0.at(1);
+        // MTP-1/2/3 measure the total movement matrix s0 -> s1
+        let mtp = MtpMovementMatrix::measure(&s0, &s1);
+        assert!(mtp.reversible); // constant-velocity drift is reversible
+        // "time travel": from s1, the lens projects the reverse slice -> s0 byte-identical (retrodiction)
+        assert_eq!(mtp.project_reverse(&s1).serialize(), s0.serialize());
+        // and forward -> s2 byte-identical (the same matrix runs both ways)
+        assert_eq!(mtp.project_forward(&s1).serialize(), s0.at(2).serialize());
+        assert!(mtp.hbp().contains("reversible=true") && mtp.hbp().ends_with("json=0"));
+    }
+
+    #[test]
+    fn arrow_of_time_irreversible_step_cannot_be_retrodicted() {
+        // a particle heading off the edge is CLAMPED (velocity zeroed = information lost)
+        let s = SimState { w: 10, h: 10, particles: vec![Particle { x: 9, y: 5, vx: 3, vy: 0, tag: 1 }] };
+        let clamped = s.clamp_step();
+        let mtp = MtpMovementMatrix::measure(&s, &clamped);
+        assert!(!mtp.reversible); // the velocity changed -> the movement lost information
+        // reverse-propagating the clamped present does NOT recover the true past -> the arrow of time bites
+        assert_ne!(mtp.project_reverse(&clamped).serialize(), s.serialize());
     }
 }
