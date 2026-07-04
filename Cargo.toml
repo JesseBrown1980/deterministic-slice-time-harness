@@ -1,0 +1,17 @@
+[package]
+name = "deterministic-slice-time-harness"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.63"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "The capstone: 0-loss slice-time extrapolation, or Held. A deterministic metatagged particle sim -> multi-cylinder shadow projections -> Q-PRISM/Path-2 state reconstruction -> known reversible rule forward+backward -> byte-identical vs truth, or Held. 0-loss ONLY on the determined component; new entropy is DETECTED, never manufactured. Schrodinger-free because simulated, not quantum. Zero deps, json=0."
+repository = "https://github.com/JesseBrown1980/deterministic-slice-time-harness"
+
+[lib]
+name = "deterministic_slice_time_harness"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
