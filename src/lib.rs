@@ -197,6 +197,73 @@ pub fn verify_or_detect_entropy(state0: &SimState, observed_future: &SimState, d
     }
 }
 
+// ================================================================ WATCHER GATE (yin-yang)
+// The classical consistency layer. Black-absorb (project shadows) -> white-emit (reconstruct) must
+// round-trip to the original; every EXTRA cylinder beyond the sufficient subset is CONSISTENCY-
+// CHECKED (over-determination = the hallucination-detection budget); anything that disagrees is
+// Held, never emitted. Returns a VERIFIED CLASSICAL clone (a representation copy; no-cloning
+// respected - NOT a physical quantum clone) or Held. Round-trip + consistency + Shannon-ledger =
+// MEASURED; GNN-forward / reverse-GNN = DESIGN scaffold. Universe-analogue (boundary encodes bulk,
+// forward/reverse gate state, extra observation reduces ambiguity, undetermined stays Held) = DESIGN
+// - no claim this IS the universe engine.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict { VerifiedClone(Vec<u8>), Held(HeldReason) }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldReason { InsufficientShadows, WatcherDisagreement }
+
+/// The watcher gate: reconstruct from `sufficient`; then every `cross` cylinder must agree with the
+/// reconstruction (catches a corrupted / hallucinated shadow). All agree -> verified classical clone.
+pub fn watcher_gate(shadows: &[Vec<u64>], sufficient: &[usize], cross: &[usize], orig_len: usize) -> Verdict {
+    let recon = match reconstruct(shadows, sufficient, orig_len) {
+        Ok(r) => r,
+        Err(_) => return Verdict::Held(HeldReason::InsufficientShadows),
+    };
+    for &ci in cross {
+        let recomputed: Vec<u64> = blocks(&recon).iter().map(|&b| (b % CYLINDERS[ci] as u128) as u64).collect();
+        if recomputed != shadows[ci] { return Verdict::Held(HeldReason::WatcherDisagreement); }
+    }
+    Verdict::VerifiedClone(recon)
+}
+
+/// FNV-1a 64-bit fold -> an 8-byte addressing digest (NOT a crypto hash).
+fn digest8(slice: &[u8]) -> [u8; 8] {
+    let mut h = 0xcbf29ce484222325u64;
+    for &b in slice { h = (h ^ b as u64).wrapping_mul(0x100000001b3); }
+    h.to_be_bytes()
+}
+fn hex8(b: &[u8; 8]) -> String { b.iter().map(|x| format!("{:02x}", x)).collect() }
+
+/// The OMNIBIT PIXEL - one pixel carrying the representation STACK as SELECTORS + CHECKS, not raw
+/// payload: position/tick/frequency, an 8-byte fold digest, the residual selector bits, the signed
+/// over-determination margin (>=0 = redundancy; never literal negative storage), and the watcher
+/// bound (# of consistency checks passed). It does NOT reconstruct the slice alone - it selects and
+/// checks against the shared atlas. Not a magical all-information bit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OmnibitPixel {
+    pub x: u16, pub y: u16, pub tick: u32, pub freq: u16,
+    pub digest8: [u8; 8],
+    pub residual_bits: u8,
+    pub capacity_margin_bits: i32,
+    pub watcher_bound: u8,
+}
+impl OmnibitPixel {
+    pub fn of(slice: &[u8], x: u16, y: u16, tick: u32, freq: u16, n_cylinders: usize, watcher_bound: u8) -> Self {
+        let roof = (n_cylinders.min(CYLINDERS.len()) as f64) * 25.0; // ~log2(2^25) per cylinder
+        let block_bits = (8 * BLOCK) as f64;
+        OmnibitPixel {
+            x, y, tick, freq, digest8: digest8(slice),
+            residual_bits: (block_bits - roof).max(0.0).ceil() as u8,
+            capacity_margin_bits: (roof - block_bits) as i32,
+            watcher_bound,
+        }
+    }
+    pub fn to_hbp(&self) -> String {
+        format!("OMNIBITPIXEL|x={}|y={}|tick={}|freq={}|digest8={}|residual_bits={}|capacity_margin_bits={}|watcher_bound={}|payload=selector-not-raw|json=0",
+            self.x, self.y, self.tick, self.freq, hex8(&self.digest8), self.residual_bits, self.capacity_margin_bits, self.watcher_bound)
+    }
+}
+
 // ================================================================ tests
 #[cfg(test)]
 mod tests {
