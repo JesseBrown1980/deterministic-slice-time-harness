@@ -333,4 +333,29 @@ mod tests {
         assert!(rows.iter().all(|r| r.ends_with("json=0")) && !rows.join("").contains('{'));
         assert!(rows[1].contains("new_entropy=detected-not-predicted"));
     }
+
+    #[test]
+    fn watcher_gate_verifies_clean_and_catches_tamper() {
+        let slice = b"the yin-yang watcher: black-absorb, white-emit, round-trip or Held";
+        let shadows = project_shadows(slice);
+        // clean: reconstruct from [0,1], cross-check [2,3] -> verified classical clone
+        assert_eq!(watcher_gate(&shadows, &[0, 1], &[2, 3], slice.len()), Verdict::VerifiedClone(slice.to_vec()));
+        // tamper a sufficient shadow -> the cross cylinders catch the hallucination -> Held
+        let mut tampered = shadows.clone();
+        tampered[0][0] = tampered[0][0].wrapping_add(1);
+        assert_eq!(watcher_gate(&tampered, &[0, 1], &[2, 3], slice.len()), Verdict::Held(HeldReason::WatcherDisagreement));
+        // too few -> Held (Shannon)
+        assert_eq!(watcher_gate(&shadows, &[0], &[], slice.len()), Verdict::Held(HeldReason::InsufficientShadows));
+    }
+
+    #[test]
+    fn omnibit_pixel_is_selector_not_payload() {
+        let slice = b"omnibit pixel = selectors + checks, not raw payload";
+        let px2 = OmnibitPixel::of(slice, 3, 5, 7, 440, 2, 2);
+        assert_eq!(px2.residual_bits, 0); // 2 cylinders (~50 bits) cover the 48-bit block
+        assert!(px2.capacity_margin_bits >= 0); // over-determination margin, never negative storage
+        let px1 = OmnibitPixel::of(slice, 3, 5, 7, 440, 1, 0);
+        assert!(px1.residual_bits > 0); // 1 cylinder under-covers -> residual selector remains
+        assert!(px2.to_hbp().contains("payload=selector-not-raw") && px2.to_hbp().ends_with("json=0"));
+    }
 }
