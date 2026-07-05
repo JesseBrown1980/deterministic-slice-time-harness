@@ -34,29 +34,60 @@ pub enum Held {
 }
 
 fn blocks(d: &[u8]) -> Vec<u128> {
-    d.chunks(BLOCK).map(|c| {
-        let mut v = 0u128;
-        for &b in c { v = (v << 8) | b as u128; }
-        if c.len() < BLOCK { v <<= 8 * (BLOCK - c.len()) as u32; }
-        v
-    }).collect()
+    d.chunks(BLOCK)
+        .map(|c| {
+            let mut v = 0u128;
+            for &b in c {
+                v = (v << 8) | b as u128;
+            }
+            if c.len() < BLOCK {
+                v <<= 8 * (BLOCK - c.len()) as u32;
+            }
+            v
+        })
+        .collect()
 }
 fn mod_inv(a: u128, m: u128) -> Option<u128> {
-    fn e(a: i128, b: i128) -> (i128, i128, i128) { if a == 0 { (b, 0, 1) } else { let (g, x, y) = e(b % a, a); (g, y - (b / a) * x, x) } }
-    if m == 0 { return None; }
+    fn e(a: i128, b: i128) -> (i128, i128, i128) {
+        if a == 0 {
+            (b, 0, 1)
+        } else {
+            let (g, x, y) = e(b % a, a);
+            (g, y - (b / a) * x, x)
+        }
+    }
+    if m == 0 {
+        return None;
+    }
     let (g, x, _) = e((a % m) as i128, m as i128);
-    if g != 1 { return None; }
+    if g != 1 {
+        return None;
+    }
     Some((((x % m as i128) + m as i128) % m as i128) as u128)
 }
 /// The K shadow projections of a slice: residues of each block on each cylinder (the tomographic
 /// projections at K "angles"). Each shadow alone is lossy; enough of them reconstruct the slice.
 pub fn project_shadows(slice: &[u8]) -> Vec<Vec<u64>> {
-    CYLINDERS.iter().map(|&p| blocks(slice).iter().map(|&b| (b % p as u128) as u64).collect()).collect()
+    CYLINDERS
+        .iter()
+        .map(|&p| {
+            blocks(slice)
+                .iter()
+                .map(|&b| (b % p as u128) as u64)
+                .collect()
+        })
+        .collect()
 }
 /// Reconstruct the exact slice from a SUBSET of shadows (the inverse Radon / CRT). `Held` if the
 /// subset's joint modulus doesn't cover a block (under-sampled angles -> ill-posed).
-pub fn reconstruct(shadows: &[Vec<u64>], subset: &[usize], orig_len: usize) -> Result<Vec<u8>, Held> {
-    if subset.is_empty() { return Err(Held::InsufficientShadows); }
+pub fn reconstruct(
+    shadows: &[Vec<u64>],
+    subset: &[usize],
+    orig_len: usize,
+) -> Result<Vec<u8>, Held> {
+    if subset.is_empty() {
+        return Err(Held::InsufficientShadows);
+    }
     let range = 1u128 << (8 * BLOCK as u32);
     let nb = shadows[subset[0]].len();
     let mut out = Vec::with_capacity(nb * BLOCK);
@@ -69,10 +100,16 @@ pub fn reconstruct(shadows: &[Vec<u64>], subset: &[usize], orig_len: usize) -> R
             let diff = (((s as i128 - r as i128) % p as i128) + p as i128) % p as i128;
             r += m * ((diff as u128 * inv) % p);
             m *= p;
-            if m >= range { break; }
+            if m >= range {
+                break;
+            }
         }
-        if m < range { return Err(Held::InsufficientShadows); }
-        for i in (0..BLOCK).rev() { out.push(((r >> (8 * i as u32)) & 0xFF) as u8); }
+        if m < range {
+            return Err(Held::InsufficientShadows);
+        }
+        for i in (0..BLOCK).rev() {
+            out.push(((r >> (8 * i as u32)) & 0xFF) as u8);
+        }
     }
     out.truncate(orig_len);
     Ok(out)
@@ -81,13 +118,23 @@ pub fn reconstruct(shadows: &[Vec<u64>], subset: &[usize], orig_len: usize) -> R
 // ---------------------------------------------------------------- metatagged deterministic sim
 /// A metatagged particle on the bounded torus grid.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Particle { pub x: u16, pub y: u16, pub vx: i16, pub vy: i16, pub tag: u32 }
+pub struct Particle {
+    pub x: u16,
+    pub y: u16,
+    pub vx: i16,
+    pub vy: i16,
+    pub tag: u32,
+}
 
 /// The simulated-universe STATE = a bounded grid of metatagged particles. Its serialization is the
 /// "slice"; the transition rule is constant-velocity torus drift (deterministic + REVERSIBLE, so
 /// retrodiction and extrapolation are the same operation at +/-t).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SimState { pub w: u16, pub h: u16, pub particles: Vec<Particle> }
+pub struct SimState {
+    pub w: u16,
+    pub h: u16,
+    pub particles: Vec<Particle>,
+}
 
 impl SimState {
     /// Canonical serialization (particles sorted by tag) -> the slice bytes.
@@ -108,15 +155,21 @@ impl SimState {
         out
     }
     pub fn deserialize(bytes: &[u8]) -> Option<SimState> {
-        if bytes.len() < 6 { return None; }
+        if bytes.len() < 6 {
+            return None;
+        }
         let w = u16::from_be_bytes([bytes[0], bytes[1]]);
         let h = u16::from_be_bytes([bytes[2], bytes[3]]);
         let n = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
-        if w == 0 || h == 0 { return None; }
+        if w == 0 || h == 0 {
+            return None;
+        }
         let mut particles = Vec::with_capacity(n);
         for i in 0..n {
             let o = 6 + i * 12;
-            if o + 12 > bytes.len() { return None; }
+            if o + 12 > bytes.len() {
+                return None;
+            }
             particles.push(Particle {
                 x: u16::from_be_bytes([bytes[o], bytes[o + 1]]),
                 y: u16::from_be_bytes([bytes[o + 2], bytes[o + 3]]),
@@ -129,34 +182,76 @@ impl SimState {
     }
     /// Deterministic, reversible transition by `dt` steps (constant-velocity torus drift).
     pub fn at(&self, dt: i64) -> SimState {
-        let particles = self.particles.iter().map(|p| Particle {
-            x: (p.x as i64 + dt * p.vx as i64).rem_euclid(self.w as i64) as u16,
-            y: (p.y as i64 + dt * p.vy as i64).rem_euclid(self.h as i64) as u16,
-            vx: p.vx, vy: p.vy, tag: p.tag,
-        }).collect();
-        SimState { w: self.w, h: self.h, particles }
+        let particles = self
+            .particles
+            .iter()
+            .map(|p| Particle {
+                x: (p.x as i64 + dt * p.vx as i64).rem_euclid(self.w as i64) as u16,
+                y: (p.y as i64 + dt * p.vy as i64).rem_euclid(self.h as i64) as u16,
+                vx: p.vx,
+                vy: p.vy,
+                tag: p.tag,
+            })
+            .collect();
+        SimState {
+            w: self.w,
+            h: self.h,
+            particles,
+        }
     }
-    pub fn step_forward(&self) -> SimState { self.at(1) }
-    pub fn step_backward(&self) -> SimState { self.at(-1) }
+    pub fn step_forward(&self) -> SimState {
+        self.at(1)
+    }
+    pub fn step_backward(&self) -> SimState {
+        self.at(-1)
+    }
     /// An IRREVERSIBLE step (the arrow of time): a particle that would leave the grid is CLAMPED to
     /// the edge and its velocity ZEROED - the pre-collision velocity is LOST. Once this happens,
     /// reverse-propagation cannot uniquely recover the past (many pasts map to this present).
     pub fn clamp_step(&self) -> SimState {
-        let particles = self.particles.iter().map(|p| {
-            let nx = p.x as i32 + p.vx as i32;
-            let ny = p.y as i32 + p.vy as i32;
-            let (x, vx) = if nx < 0 || nx >= self.w as i32 { (p.x, 0i16) } else { (nx as u16, p.vx) };
-            let (y, vy) = if ny < 0 || ny >= self.h as i32 { (p.y, 0i16) } else { (ny as u16, p.vy) };
-            Particle { x, y, vx, vy, tag: p.tag }
-        }).collect();
-        SimState { w: self.w, h: self.h, particles }
+        let particles = self
+            .particles
+            .iter()
+            .map(|p| {
+                let nx = p.x as i32 + p.vx as i32;
+                let ny = p.y as i32 + p.vy as i32;
+                let (x, vx) = if nx < 0 || nx >= self.w as i32 {
+                    (p.x, 0i16)
+                } else {
+                    (nx as u16, p.vx)
+                };
+                let (y, vy) = if ny < 0 || ny >= self.h as i32 {
+                    (p.y, 0i16)
+                } else {
+                    (ny as u16, p.vy)
+                };
+                Particle {
+                    x,
+                    y,
+                    vx,
+                    vy,
+                    tag: p.tag,
+                }
+            })
+            .collect();
+        SimState {
+            w: self.w,
+            h: self.h,
+            particles,
+        }
     }
 }
 
 // ---------------------------------------------------------------- MTP movement matrix (the "time-travel" lens)
 fn torus_delta(from: u16, to: u16, m: u16) -> i32 {
     let (d, m) = (to as i32 - from as i32, m as i32);
-    if d > m / 2 { d - m } else if d < -m / 2 { d + m } else { d } // shortest signed torus delta
+    if d > m / 2 {
+        d - m
+    } else if d < -m / 2 {
+        d + m
+    } else {
+        d
+    } // shortest signed torus delta
 }
 /// The total movement matrix the MTP-1/2/3 supervisors measure between two slices: per metatag,
 /// MTP1 = pixel delta (dx,dy), MTP2 = frequency/shell (speed), MTP3 = cylinder/residue (tag identity).
@@ -174,8 +269,14 @@ impl MtpMovementMatrix {
         for pa in &a.particles {
             match b.particles.iter().find(|pb| pb.tag == pa.tag) {
                 Some(pb) => {
-                    if pb.vx != pa.vx || pb.vy != pa.vy { reversible = false; } // velocity lost -> irreversible
-                    moves.push((pa.tag, torus_delta(pa.x, pb.x, a.w), torus_delta(pa.y, pb.y, a.h)));
+                    if pb.vx != pa.vx || pb.vy != pa.vy {
+                        reversible = false;
+                    } // velocity lost -> irreversible
+                    moves.push((
+                        pa.tag,
+                        torus_delta(pa.x, pb.x, a.w),
+                        torus_delta(pa.y, pb.y, a.h),
+                    ));
                 }
                 None => reversible = false,
             }
@@ -183,20 +284,39 @@ impl MtpMovementMatrix {
         MtpMovementMatrix { moves, reversible }
     }
     fn apply(&self, state: &SimState, dir: i32) -> SimState {
-        let particles = state.particles.iter().map(|p| {
-            let (dx, dy) = self.moves.iter().find(|(t, _, _)| *t == p.tag).map(|(_, dx, dy)| (*dx, *dy)).unwrap_or((0, 0));
-            Particle {
-                x: (p.x as i32 + dir * dx).rem_euclid(state.w as i32) as u16,
-                y: (p.y as i32 + dir * dy).rem_euclid(state.h as i32) as u16,
-                vx: p.vx, vy: p.vy, tag: p.tag,
-            }
-        }).collect();
-        SimState { w: state.w, h: state.h, particles }
+        let particles = state
+            .particles
+            .iter()
+            .map(|p| {
+                let (dx, dy) = self
+                    .moves
+                    .iter()
+                    .find(|(t, _, _)| *t == p.tag)
+                    .map(|(_, dx, dy)| (*dx, *dy))
+                    .unwrap_or((0, 0));
+                Particle {
+                    x: (p.x as i32 + dir * dx).rem_euclid(state.w as i32) as u16,
+                    y: (p.y as i32 + dir * dy).rem_euclid(state.h as i32) as u16,
+                    vx: p.vx,
+                    vy: p.vy,
+                    tag: p.tag,
+                }
+            })
+            .collect();
+        SimState {
+            w: state.w,
+            h: state.h,
+            particles,
+        }
     }
     /// Reverse LeWorld through the lens: project the slice one tick into the PAST (retrodiction).
-    pub fn project_reverse(&self, state: &SimState) -> SimState { self.apply(state, -1) }
+    pub fn project_reverse(&self, state: &SimState) -> SimState {
+        self.apply(state, -1)
+    }
     /// Forward LeWorld: project the slice one tick into the FUTURE.
-    pub fn project_forward(&self, state: &SimState) -> SimState { self.apply(state, 1) }
+    pub fn project_forward(&self, state: &SimState) -> SimState {
+        self.apply(state, 1)
+    }
     pub fn hbp(&self) -> String {
         format!("MTPMATRIX|moves={}|mtp1=pixel_delta|mtp2=frequency_shell|mtp3=cylinder_residue|reversible={}|lens=reverse_leworld_projection|body_in_row=0|json=0",
             self.moves.len(), self.reversible)
@@ -235,7 +355,11 @@ impl SliceTimeReport {
 /// The deterministic regime (steps 1-6): reconstruct t0 from shadows (multi-cylinder / Q-PRISM),
 /// extrapolate the KNOWN rule forward and backward, and compare each predicted slice byte-for-byte
 /// against generated truth. Exact in the determined regime; `Held` if shadows are insufficient.
-pub fn run_deterministic(truth0: &SimState, horizon: i64, subset: &[usize]) -> Result<SliceTimeReport, Held> {
+pub fn run_deterministic(
+    truth0: &SimState,
+    horizon: i64,
+    subset: &[usize],
+) -> Result<SliceTimeReport, Held> {
     let slice0 = truth0.serialize();
     let shadows = project_shadows(&slice0);
     let recon = reconstruct(&shadows, subset, slice0.len())?;
@@ -246,13 +370,21 @@ pub fn run_deterministic(truth0: &SimState, horizon: i64, subset: &[usize]) -> R
         forward_exact.push((k, state0.at(k).serialize() == truth0.at(k).serialize()));
         backward_exact.push((-k, state0.at(-k).serialize() == truth0.at(-k).serialize()));
     }
-    Ok(SliceTimeReport { reconstructed_ok, forward_exact, backward_exact })
+    Ok(SliceTimeReport {
+        reconstructed_ok,
+        forward_exact,
+        backward_exact,
+    })
 }
 
 /// The HONEST BOUNDARY (step 6): given a truth slice that GAINED entropy the rule cannot fix (an
 /// injected particle, an external input), the deterministic prediction from `state0` will NOT match.
 /// Returns Err(PredictionDivergedNewEntropy) - the break is DETECTED, never silently "predicted".
-pub fn verify_or_detect_entropy(state0: &SimState, observed_future: &SimState, dt: i64) -> Result<(), Held> {
+pub fn verify_or_detect_entropy(
+    state0: &SimState,
+    observed_future: &SimState,
+    dt: i64,
+) -> Result<(), Held> {
     if state0.at(dt).serialize() == observed_future.serialize() {
         Ok(()) // determined: 0-loss
     } else {
@@ -271,20 +403,36 @@ pub fn verify_or_detect_entropy(state0: &SimState, observed_future: &SimState, d
 // - no claim this IS the universe engine.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Verdict { VerifiedClone(Vec<u8>), Held(HeldReason) }
+pub enum Verdict {
+    VerifiedClone(Vec<u8>),
+    Held(HeldReason),
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HeldReason { InsufficientShadows, WatcherDisagreement }
+pub enum HeldReason {
+    InsufficientShadows,
+    WatcherDisagreement,
+}
 
 /// The watcher gate: reconstruct from `sufficient`; then every `cross` cylinder must agree with the
 /// reconstruction (catches a corrupted / hallucinated shadow). All agree -> verified classical clone.
-pub fn watcher_gate(shadows: &[Vec<u64>], sufficient: &[usize], cross: &[usize], orig_len: usize) -> Verdict {
+pub fn watcher_gate(
+    shadows: &[Vec<u64>],
+    sufficient: &[usize],
+    cross: &[usize],
+    orig_len: usize,
+) -> Verdict {
     let recon = match reconstruct(shadows, sufficient, orig_len) {
         Ok(r) => r,
         Err(_) => return Verdict::Held(HeldReason::InsufficientShadows),
     };
     for &ci in cross {
-        let recomputed: Vec<u64> = blocks(&recon).iter().map(|&b| (b % CYLINDERS[ci] as u128) as u64).collect();
-        if recomputed != shadows[ci] { return Verdict::Held(HeldReason::WatcherDisagreement); }
+        let recomputed: Vec<u64> = blocks(&recon)
+            .iter()
+            .map(|&b| (b % CYLINDERS[ci] as u128) as u64)
+            .collect();
+        if recomputed != shadows[ci] {
+            return Verdict::Held(HeldReason::WatcherDisagreement);
+        }
     }
     Verdict::VerifiedClone(recon)
 }
@@ -292,10 +440,14 @@ pub fn watcher_gate(shadows: &[Vec<u64>], sufficient: &[usize], cross: &[usize],
 /// FNV-1a 64-bit fold -> an 8-byte addressing digest (NOT a crypto hash).
 fn digest8(slice: &[u8]) -> [u8; 8] {
     let mut h = 0xcbf29ce484222325u64;
-    for &b in slice { h = (h ^ b as u64).wrapping_mul(0x100000001b3); }
+    for &b in slice {
+        h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+    }
     h.to_be_bytes()
 }
-fn hex8(b: &[u8; 8]) -> String { b.iter().map(|x| format!("{:02x}", x)).collect() }
+fn hex8(b: &[u8; 8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
+}
 
 /// The OMNIBIT PIXEL - one pixel carrying the representation STACK as SELECTORS + CHECKS, not raw
 /// payload: position/tick/frequency, an 8-byte fold digest, the residual selector bits, the signed
@@ -304,18 +456,33 @@ fn hex8(b: &[u8; 8]) -> String { b.iter().map(|x| format!("{:02x}", x)).collect(
 /// checks against the shared atlas. Not a magical all-information bit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OmnibitPixel {
-    pub x: u16, pub y: u16, pub tick: u32, pub freq: u16,
+    pub x: u16,
+    pub y: u16,
+    pub tick: u32,
+    pub freq: u16,
     pub digest8: [u8; 8],
     pub residual_bits: u8,
     pub capacity_margin_bits: i32,
     pub watcher_bound: u8,
 }
 impl OmnibitPixel {
-    pub fn of(slice: &[u8], x: u16, y: u16, tick: u32, freq: u16, n_cylinders: usize, watcher_bound: u8) -> Self {
+    pub fn of(
+        slice: &[u8],
+        x: u16,
+        y: u16,
+        tick: u32,
+        freq: u16,
+        n_cylinders: usize,
+        watcher_bound: u8,
+    ) -> Self {
         let roof = (n_cylinders.min(CYLINDERS.len()) as f64) * 25.0; // ~log2(2^25) per cylinder
         let block_bits = (8 * BLOCK) as f64;
         OmnibitPixel {
-            x, y, tick, freq, digest8: digest8(slice),
+            x,
+            y,
+            tick,
+            freq,
+            digest8: digest8(slice),
             residual_bits: (block_bits - roof).max(0.0).ceil() as u8,
             capacity_margin_bits: (roof - block_bits) as i32,
             watcher_bound,
@@ -334,12 +501,37 @@ mod tests {
 
     fn sample_state() -> SimState {
         SimState {
-            w: 64, h: 48,
+            w: 64,
+            h: 48,
             particles: vec![
-                Particle { x: 3, y: 5, vx: 2, vy: -1, tag: 1 },
-                Particle { x: 60, y: 1, vx: -3, vy: 4, tag: 2 },
-                Particle { x: 31, y: 24, vx: 1, vy: 1, tag: 3 },
-                Particle { x: 0, y: 47, vx: 5, vy: -2, tag: 4 },
+                Particle {
+                    x: 3,
+                    y: 5,
+                    vx: 2,
+                    vy: -1,
+                    tag: 1,
+                },
+                Particle {
+                    x: 60,
+                    y: 1,
+                    vx: -3,
+                    vy: 4,
+                    tag: 2,
+                },
+                Particle {
+                    x: 31,
+                    y: 24,
+                    vx: 1,
+                    vy: 1,
+                    tag: 3,
+                },
+                Particle {
+                    x: 0,
+                    y: 47,
+                    vx: 5,
+                    vy: -2,
+                    tag: 4,
+                },
             ],
         }
     }
@@ -348,7 +540,9 @@ mod tests {
     fn serialize_roundtrips() {
         let s = sample_state();
         assert_eq!(SimState::deserialize(&s.serialize()).unwrap(), {
-            let mut c = s.clone(); c.particles.sort_by_key(|p| p.tag); c
+            let mut c = s.clone();
+            c.particles.sort_by_key(|p| p.tag);
+            c
         });
     }
 
@@ -356,7 +550,11 @@ mod tests {
     fn rule_is_reversible() {
         let s = sample_state();
         for k in 1..=20 {
-            assert_eq!(s.at(k).at(-k).serialize(), s.serialize(), "at(+{k}).at(-{k}) must be identity");
+            assert_eq!(
+                s.at(k).at(-k).serialize(),
+                s.serialize(),
+                "at(+{k}).at(-{k}) must be identity"
+            );
         }
     }
 
@@ -366,7 +564,10 @@ mod tests {
         // enough shadows (all 4 cylinders) -> full state reconstructed -> every slice exact both ways
         let report = run_deterministic(&s, 25, &[0, 1, 2, 3]).unwrap();
         assert!(report.reconstructed_ok);
-        assert!(report.all_exact(), "determined regime: past AND future slices are 0-loss");
+        assert!(
+            report.all_exact(),
+            "determined regime: past AND future slices are 0-loss"
+        );
         assert_eq!(report.forward_exact.len(), 25);
         assert_eq!(report.backward_exact.len(), 25);
     }
@@ -375,7 +576,10 @@ mod tests {
     fn two_shadows_already_suffice_one_holds() {
         let s = sample_state();
         assert!(run_deterministic(&s, 5, &[0, 1]).unwrap().all_exact()); // 2 cylinders cover a 48-bit block
-        assert!(matches!(run_deterministic(&s, 5, &[0]), Err(Held::InsufficientShadows))); // 1 -> Shannon Held
+        assert!(matches!(
+            run_deterministic(&s, 5, &[0]),
+            Err(Held::InsufficientShadows)
+        )); // 1 -> Shannon Held
     }
 
     #[test]
@@ -385,8 +589,17 @@ mod tests {
         assert!(verify_or_detect_entropy(&s, &s.at(7), 7).is_ok());
         // but a future that GAINED entropy (an injected particle) is DETECTED, never manufactured:
         let mut injected = s.at(7);
-        injected.particles.push(Particle { x: 9, y: 9, vx: 0, vy: 0, tag: 9999 });
-        assert_eq!(verify_or_detect_entropy(&s, &injected, 7), Err(Held::PredictionDivergedNewEntropy));
+        injected.particles.push(Particle {
+            x: 9,
+            y: 9,
+            vx: 0,
+            vy: 0,
+            tag: 9999,
+        });
+        assert_eq!(
+            verify_or_detect_entropy(&s, &injected, 7),
+            Err(Held::PredictionDivergedNewEntropy)
+        );
     }
 
     #[test]
@@ -402,13 +615,22 @@ mod tests {
         let slice = b"the yin-yang watcher: black-absorb, white-emit, round-trip or Held";
         let shadows = project_shadows(slice);
         // clean: reconstruct from [0,1], cross-check [2,3] -> verified classical clone
-        assert_eq!(watcher_gate(&shadows, &[0, 1], &[2, 3], slice.len()), Verdict::VerifiedClone(slice.to_vec()));
+        assert_eq!(
+            watcher_gate(&shadows, &[0, 1], &[2, 3], slice.len()),
+            Verdict::VerifiedClone(slice.to_vec())
+        );
         // tamper a sufficient shadow -> the cross cylinders catch the hallucination -> Held
         let mut tampered = shadows.clone();
         tampered[0][0] = tampered[0][0].wrapping_add(1);
-        assert_eq!(watcher_gate(&tampered, &[0, 1], &[2, 3], slice.len()), Verdict::Held(HeldReason::WatcherDisagreement));
+        assert_eq!(
+            watcher_gate(&tampered, &[0, 1], &[2, 3], slice.len()),
+            Verdict::Held(HeldReason::WatcherDisagreement)
+        );
         // too few -> Held (Shannon)
-        assert_eq!(watcher_gate(&shadows, &[0], &[], slice.len()), Verdict::Held(HeldReason::InsufficientShadows));
+        assert_eq!(
+            watcher_gate(&shadows, &[0], &[], slice.len()),
+            Verdict::Held(HeldReason::InsufficientShadows)
+        );
     }
 
     #[test]
@@ -419,7 +641,9 @@ mod tests {
         assert!(px2.capacity_margin_bits >= 0); // over-determination margin, never negative storage
         let px1 = OmnibitPixel::of(slice, 3, 5, 7, 440, 1, 0);
         assert!(px1.residual_bits > 0); // 1 cylinder under-covers -> residual selector remains
-        assert!(px2.to_hbp().contains("payload=selector-not-raw") && px2.to_hbp().ends_with("json=0"));
+        assert!(
+            px2.to_hbp().contains("payload=selector-not-raw") && px2.to_hbp().ends_with("json=0")
+        );
     }
 
     #[test]
@@ -429,7 +653,7 @@ mod tests {
         // MTP-1/2/3 measure the total movement matrix s0 -> s1
         let mtp = MtpMovementMatrix::measure(&s0, &s1);
         assert!(mtp.reversible); // constant-velocity drift is reversible
-        // "time travel": from s1, the lens projects the reverse slice -> s0 byte-identical (retrodiction)
+                                 // "time travel": from s1, the lens projects the reverse slice -> s0 byte-identical (retrodiction)
         assert_eq!(mtp.project_reverse(&s1).serialize(), s0.serialize());
         // and forward -> s2 byte-identical (the same matrix runs both ways)
         assert_eq!(mtp.project_forward(&s1).serialize(), s0.at(2).serialize());
@@ -439,11 +663,21 @@ mod tests {
     #[test]
     fn arrow_of_time_irreversible_step_cannot_be_retrodicted() {
         // a particle heading off the edge is CLAMPED (velocity zeroed = information lost)
-        let s = SimState { w: 10, h: 10, particles: vec![Particle { x: 9, y: 5, vx: 3, vy: 0, tag: 1 }] };
+        let s = SimState {
+            w: 10,
+            h: 10,
+            particles: vec![Particle {
+                x: 9,
+                y: 5,
+                vx: 3,
+                vy: 0,
+                tag: 1,
+            }],
+        };
         let clamped = s.clamp_step();
         let mtp = MtpMovementMatrix::measure(&s, &clamped);
         assert!(!mtp.reversible); // the velocity changed -> the movement lost information
-        // reverse-propagating the clamped present does NOT recover the true past -> the arrow of time bites
+                                  // reverse-propagating the clamped present does NOT recover the true past -> the arrow of time bites
         assert_ne!(mtp.project_reverse(&clamped).serialize(), s.serialize());
     }
 }
