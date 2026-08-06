@@ -475,16 +475,17 @@ impl OmnibitPixel {
         n_cylinders: usize,
         watcher_bound: u8,
     ) -> Self {
-        let roof = (n_cylinders.min(CYLINDERS.len()) as f64) * 25.0; // ~log2(2^25) per cylinder
-        let block_bits = (8 * BLOCK) as f64;
+        // both quantities are whole bits; integer only (operator rule: no float)
+        let roof: usize = n_cylinders.min(CYLINDERS.len()) * 25; // ~log2(2^25) per cylinder
+        let block_bits: usize = 8 * BLOCK;
         OmnibitPixel {
             x,
             y,
             tick,
             freq,
             digest8: digest8(slice),
-            residual_bits: (block_bits - roof).max(0.0).ceil() as u8,
-            capacity_margin_bits: (roof - block_bits) as i32,
+            residual_bits: block_bits.saturating_sub(roof) as u8,
+            capacity_margin_bits: roof as i32 - block_bits as i32,
             watcher_bound,
         }
     }
