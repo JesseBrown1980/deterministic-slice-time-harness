@@ -1,5 +1,17 @@
 # deterministic-slice-time-harness
 
+## Toolchain rule (operator, global — no exceptions)
+
+**Rust 1.81 with clippy. Integer arithmetic and ternary (trits) only — never float.**
+
+Pinned in `rust-toolchain.toml` (`channel = "1.81.0"`, `components = ["clippy", "rustfmt"]`),
+declared as `rust-version = "1.81"` in every `Cargo.toml`, and enforced in CI by
+`cargo clippy --all-targets -- -D warnings` plus a hard grep that fails the build on any
+`f32`/`f64` in `src/` or `tests/`.
+
+Any receipt in this repository naming a toolchain other than 1.81 records a run made outside
+the rule. It is retained as history, not as the toolchain of record.
+
 **The capstone of the shadow-resolution arc: 0-loss slice-time extrapolation, or `Held`.** Pure Rust, zero deps, `json=0`, no JSON no Node.
 
 The falsifiable, honest form of *"retrospectively and prospectively predict the next slices at 0 loss, independent of Schrodinger."* Stated as a **deterministic-simulation theorem, not physics.**
